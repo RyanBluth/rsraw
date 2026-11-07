@@ -76,6 +76,10 @@ impl<'a> RawImage<'a> {
         for i in 0..self.as_ref().thumbs_list.thumbcount {
             Error::check(unsafe { sys::libraw_unpack_thumb_ex(self.ptr(), i) })?;
             let thumb = &self.as_ref().thumbnail;
+            // Some loaders (e.g. Kodak) report success without allocating.
+            if thumb.thumb.is_null() || thumb.tlength == 0 {
+                continue;
+            }
             let thumb_image = ThumbnailImage {
                 format: thumb.tformat.into(),
                 width: thumb.twidth as _,
