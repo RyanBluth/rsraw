@@ -1,4 +1,9 @@
-use std::{env, fs, path::Path};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
+
+const LIBRAW_DIR: &str = "LibRaw";
 
 fn main() {
     let dir = env::var_os("OUT_DIR").unwrap();
@@ -6,13 +11,39 @@ fn main() {
     // trigger a rebuild. (bindgen's CargoCallbacks only track headers it sees,
     // which disables Cargo's default whole-package tracking.)
     for dir in ["src", "internal", "libraw"] {
-        println!("cargo:rerun-if-changed=LibRaw/{dir}");
+        println!("cargo:rerun-if-changed={LIBRAW_DIR}/{dir}");
     }
     println!("cargo:rerun-if-changed=src/bindings.rs");
     println!("cargo:rerun-if-changed=build.rs");
 
     bindings(&dir);
     build();
+}
+
+/// Every LibRaw translation unit, i.e. all `src/**/*.cpp` except the `*_ph.cpp`
+/// placeholders, which are `#include`d by other files. This matches
+/// `lib_libraw_a_SOURCES` in LibRaw's Makefile.am, so upgrading LibRaw does not
+/// require editing a hard-coded list.
+fn libraw_sources() -> Vec<PathBuf> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("LibRaw source directory is missing") {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "cpp")
+                && !path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.ends_with("_ph.cpp"))
+            {
+                out.push(path);
+            }
+        }
+    }
+    let mut sources = Vec::new();
+    walk(&Path::new(LIBRAW_DIR).join("src"), &mut sources);
+    sources.sort();
+    sources
 }
 
 fn build() {
@@ -23,87 +54,8 @@ fn build() {
     }
 
     libraw.cpp(true);
-    libraw.include("LibRaw/");
-
-    libraw.file("LibRaw/src/decoders/canon_600.cpp");
-    libraw.file("LibRaw/src/decoders/crx.cpp");
-    libraw.file("LibRaw/src/decoders/decoders_dcraw.cpp");
-    libraw.file("LibRaw/src/decoders/decoders_libraw.cpp");
-    libraw.file("LibRaw/src/decoders/decoders_libraw_dcrdefs.cpp");
-    libraw.file("LibRaw/src/decoders/dng.cpp");
-    libraw.file("LibRaw/src/decoders/fp_dng.cpp");
-    libraw.file("LibRaw/src/decoders/fuji_compressed.cpp");
-    libraw.file("LibRaw/src/decoders/generic.cpp");
-    libraw.file("LibRaw/src/decoders/kodak_decoders.cpp");
-    libraw.file("LibRaw/src/decoders/load_mfbacks.cpp");
-    libraw.file("LibRaw/src/decoders/smal.cpp");
-    libraw.file("LibRaw/src/decoders/unpack.cpp");
-    libraw.file("LibRaw/src/decoders/unpack_thumb.cpp");
-    libraw.file("LibRaw/src/demosaic/aahd_demosaic.cpp");
-    libraw.file("LibRaw/src/demosaic/ahd_demosaic.cpp");
-    libraw.file("LibRaw/src/demosaic/dcb_demosaic.cpp");
-    libraw.file("LibRaw/src/demosaic/dht_demosaic.cpp");
-    libraw.file("LibRaw/src/demosaic/misc_demosaic.cpp");
-    libraw.file("LibRaw/src/demosaic/xtrans_demosaic.cpp");
-    libraw.file("LibRaw/src/integration/dngsdk_glue.cpp");
-    libraw.file("LibRaw/src/integration/rawspeed_glue.cpp");
-    libraw.file("LibRaw/src/metadata/adobepano.cpp");
-    libraw.file("LibRaw/src/metadata/canon.cpp");
-    libraw.file("LibRaw/src/metadata/ciff.cpp");
-    libraw.file("LibRaw/src/metadata/cr3_parser.cpp");
-    libraw.file("LibRaw/src/metadata/epson.cpp");
-    libraw.file("LibRaw/src/metadata/exif_gps.cpp");
-    libraw.file("LibRaw/src/metadata/fuji.cpp");
-    libraw.file("LibRaw/src/metadata/hasselblad_model.cpp");
-    libraw.file("LibRaw/src/metadata/identify.cpp");
-    libraw.file("LibRaw/src/metadata/identify_tools.cpp");
-    libraw.file("LibRaw/src/metadata/kodak.cpp");
-    libraw.file("LibRaw/src/metadata/leica.cpp");
-    libraw.file("LibRaw/src/metadata/makernotes.cpp");
-    libraw.file("LibRaw/src/metadata/mediumformat.cpp");
-    libraw.file("LibRaw/src/metadata/minolta.cpp");
-    libraw.file("LibRaw/src/metadata/misc_parsers.cpp");
-    libraw.file("LibRaw/src/metadata/nikon.cpp");
-    libraw.file("LibRaw/src/metadata/normalize_model.cpp");
-    libraw.file("LibRaw/src/metadata/olympus.cpp");
-    libraw.file("LibRaw/src/metadata/p1.cpp");
-    libraw.file("LibRaw/src/metadata/pentax.cpp");
-    libraw.file("LibRaw/src/metadata/samsung.cpp");
-    libraw.file("LibRaw/src/metadata/sony.cpp");
-    libraw.file("LibRaw/src/metadata/tiff.cpp");
-    libraw.file("LibRaw/src/postprocessing/aspect_ratio.cpp");
-    libraw.file("LibRaw/src/postprocessing/dcraw_process.cpp");
-    libraw.file("LibRaw/src/postprocessing/mem_image.cpp");
-    libraw.file("LibRaw/src/postprocessing/postprocessing_aux.cpp");
-    //libraw.file("LibRaw/src/postprocessing/postprocessing_ph.cpp");
-    libraw.file("LibRaw/src/postprocessing/postprocessing_utils.cpp");
-    libraw.file("LibRaw/src/postprocessing/postprocessing_utils_dcrdefs.cpp");
-    libraw.file("LibRaw/src/preprocessing/ext_preprocess.cpp");
-    //libraw.file("LibRaw/src/preprocessing/preprocessing_ph.cpp");
-    libraw.file("LibRaw/src/preprocessing/raw2image.cpp");
-    libraw.file("LibRaw/src/preprocessing/subtract_black.cpp");
-    libraw.file("LibRaw/src/tables/cameralist.cpp");
-    libraw.file("LibRaw/src/tables/colorconst.cpp");
-    libraw.file("LibRaw/src/tables/colordata.cpp");
-    libraw.file("LibRaw/src/tables/wblists.cpp");
-    libraw.file("LibRaw/src/utils/curves.cpp");
-    libraw.file("LibRaw/src/utils/decoder_info.cpp");
-    libraw.file("LibRaw/src/utils/init_close_utils.cpp");
-    libraw.file("LibRaw/src/utils/open.cpp");
-    libraw.file("LibRaw/src/utils/phaseone_processing.cpp");
-    libraw.file("LibRaw/src/utils/read_utils.cpp");
-    libraw.file("LibRaw/src/utils/thumb_utils.cpp");
-    libraw.file("LibRaw/src/utils/utils_dcraw.cpp");
-    libraw.file("LibRaw/src/utils/utils_libraw.cpp");
-    libraw.file("LibRaw/src/write/apply_profile.cpp");
-    libraw.file("LibRaw/src/write/file_write.cpp");
-    libraw.file("LibRaw/src/write/tiff_writer.cpp");
-    //libraw.file("LibRaw/src/write/write_ph.cpp");
-    libraw.file("LibRaw/src/x3f/x3f_parse_process.cpp");
-    libraw.file("LibRaw/src/x3f/x3f_utils_patched.cpp");
-    libraw.file("LibRaw/src/libraw_c_api.cpp");
-    // libraw.file("LibRaw/src/libraw_cxx.cpp");
-    libraw.file("LibRaw/src/libraw_datastream.cpp");
+    libraw.include(LIBRAW_DIR);
+    libraw.files(libraw_sources());
 
     libraw.warnings(false);
     libraw.extra_warnings(false);
@@ -131,7 +83,7 @@ fn bindings(out_dir: impl AsRef<Path>) {
     }
 
     let bindings = bindgen::Builder::default()
-        .header("LibRaw/libraw/libraw.h")
+        .header(format!("{LIBRAW_DIR}/libraw/libraw.h"))
         .use_core()
         .ctypes_prefix("libc")
         .generate_comments(true)
