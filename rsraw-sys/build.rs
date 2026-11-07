@@ -2,11 +2,20 @@ use std::{env, fs, path::Path};
 
 fn main() {
     let dir = env::var_os("OUT_DIR").unwrap();
+    // Any change to LibRaw's sources, private headers or public headers must
+    // trigger a rebuild. (bindgen's CargoCallbacks only track headers it sees,
+    // which disables Cargo's default whole-package tracking.)
+    for dir in ["src", "internal", "libraw"] {
+        println!("cargo:rerun-if-changed=LibRaw/{dir}");
+    }
+    println!("cargo:rerun-if-changed=src/bindings.rs");
+    println!("cargo:rerun-if-changed=build.rs");
+
     bindings(&dir);
-    build(&dir);
+    build();
 }
 
-fn build(out_dir: impl AsRef<Path>) {
+fn build() {
     let mut libraw = cc::Build::new();
     let compiler = libraw.get_compiler();
     if compiler.is_like_msvc() {
@@ -105,13 +114,8 @@ fn build(out_dir: impl AsRef<Path>) {
 
     // thread safety
     libraw.flag("-pthread");
+    // cc emits the rustc-link-lib/search directives itself.
     libraw.compile("raw");
-
-    println!(
-        "cargo:rustc-link-search=native={}",
-        out_dir.as_ref().join("lib").display()
-    );
-    println!("cargo:rustc-link-lib=static=raw");
 }
 
 fn bindings(out_dir: impl AsRef<Path>) {
@@ -131,7 +135,6 @@ fn bindings(out_dir: impl AsRef<Path>) {
         .use_core()
         .ctypes_prefix("libc")
         .generate_comments(true)
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .layout_tests(false)
         // API improvements
         .derive_eq(true)
