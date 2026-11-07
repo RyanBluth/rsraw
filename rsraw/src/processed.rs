@@ -12,6 +12,7 @@ use crate::raw::{BitDepth, BIT_DEPTH_16, BIT_DEPTH_8};
 pub enum ImageFormat {
     Jpeg,
     Bitmap,
+    Unknown(u32),
 }
 
 pub struct ProcessedImage<const D: BitDepth> {
@@ -41,7 +42,7 @@ impl<const D: BitDepth> ProcessedImage<D> {
         match unsafe { (*self.inner).type_ } {
             sys::LibRaw_image_formats_LIBRAW_IMAGE_JPEG => ImageFormat::Jpeg,
             sys::LibRaw_image_formats_LIBRAW_IMAGE_BITMAP => ImageFormat::Bitmap,
-            _ => unreachable!(),
+            other => ImageFormat::Unknown(other as u32),
         }
     }
 
