@@ -1,8 +1,8 @@
 [package]
 name = "rsraw-sys"
-version = "0.1.1"
+version = "0.2.0"
 build = "build.rs"
-include = ["src/lib.rs", "src/bindings.rs", "LICENSE-*", "README.md", "LibRaw/libraw/*", "LibRaw/src/*", "LibRaw/internal/*", "LibRaw/COPYRIGHT", "LibRaw/LICENSE.*", "build.rs"]
+include = ["src/lib.rs", "src/bindings.rs", "LICENSE-*", "README.md", "LibRaw/libraw/**", "LibRaw/src/**", "LibRaw/internal/**", "LibRaw/COPYRIGHT", "LibRaw/LICENSE.*", "build.rs"]
 edition = "2021"
 authors = ["hexilee <i@hexilee.me>"]
 description = "Low-level FFI bindings for the LibRaw C++ library"

@@ -160,7 +160,7 @@ for thumb in thumbnails {
 ### Key Methods
 
 #### RawImage
-- `open(data: &[u8]) -> Result<Self>`: Load raw image from byte buffer
+- `open(data: &'a [u8]) -> Result<RawImage<'a>>`: Load raw image from byte buffer. LibRaw reads from the buffer lazily, so the image borrows it.
 - `unpack() -> Result<()>`: Unpack raw data for processing
 - `process<const D: BitDepth>() -> Result<ProcessedImage<D>>`: Process image
 - `extract_thumbs() -> Result<Vec<ThumbnailImage>>`: Extract thumbnails
@@ -196,17 +196,31 @@ The library supports raw formats from major camera manufacturers:
 
 ## Building
 
-The library requires a C++ compiler and the LibRaw source code (included as a submodule). The build process:
+The library requires a C++ compiler. The LibRaw source (currently **0.22.3**, unmodified upstream) is vendored in `rsraw-sys/LibRaw`. The build:
 
-1. Compiles the LibRaw C++ library
-2. Generates Rust bindings using `bindgen`
-3. Links the static library
+1. Compiles every LibRaw translation unit (`LibRaw/src/**/*.cpp`, excluding `*_ph.cpp`) into a static library
+2. Generates Rust bindings with `bindgen` (default `bindgen` feature), or uses the checked-in `rsraw-sys/src/bindings.rs`
+3. Links the static library (plus `ws2_32` on Windows)
+
+### Features
+
+- `bindgen` (default): generate bindings for the exact target at build time. Requires libclang.
+- Without `bindgen` (`default-features = false`): use the checked-in bindings. These are only valid on 64-bit Unix targets (Linux, macOS, iOS, Android); the build fails with a clear message elsewhere (e.g. Windows, where `long` is 32-bit but `time_t` is 64-bit).
 
 ### Requirements
 
-- Rust 1.70+
+- Rust 1.79+
 - C++ compiler (GCC, Clang, or MSVC)
-- CMake (for LibRaw build)
+- libclang, unless the `bindgen` feature is disabled
+
+### Updating LibRaw
+
+Replace `rsraw-sys/LibRaw` with the new upstream release, then regenerate the checked-in bindings on 64-bit Linux:
+
+```bash
+cargo build -p rsraw-sys
+cp target/debug/build/rsraw-sys-*/out/bindings.rs rsraw-sys/src/bindings.rs
+```
 
 ## Testing
 
@@ -229,6 +243,21 @@ The underlying LibRaw library has its own licensing terms. Please refer to the L
 Contributions are welcome! Please feel free to submit issues and pull requests.
 
 ## Changelog
+
+### v0.2.0
+- LibRaw 0.22.3 (from 0.21.3), including upstream security fixes
+- `RawImage` now borrows its input buffer (`RawImage<'a>`); previously safe code could drop the buffer and cause a use-after-free during `unpack()`
+- Fixed a ~700 KB leak of the LibRaw handle on every failed `open()`; `libraw_init` returning null is now an error
+- `process::<D>()` rejects bit depths other than 8/16 at compile time (previously a heap overflow in release builds)
+- Removed safe `AsMut<libraw_data_t>` (could corrupt LibRaw's internal pointers); use `unsafe fn as_mut_ptr()`
+- `unpack()` no longer overrides `use_rawspeed`/`max_raw_memory_mb` (it halved LibRaw's 2048 MB default); added `set_max_raw_memory_mb`, `set_gamma`, `set_no_auto_bright`, `set_highlight_mode`
+- MSVC support (`/EHsc`, `LIBRAW_NODLL`); explicit `ws2_32` link on Windows
+- Checked-in bindings are only used where their layout is valid; bindings are allowlisted to LibRaw's API and include layout assertions
+- `bindgen` is now an optional (default) feature
+- Rebuild when any LibRaw source changes, not just public headers
+- Fixed `LensInfo::max_focal` reporting the minimum focal length
+- `extract_thumbs` skips thumbnails LibRaw reports without data instead of building a slice from a null pointer
+- `ImageFormat::Unknown` instead of `unreachable!()`
 
 ### v0.1.0
 - Initial release
