@@ -95,17 +95,11 @@ impl<'a> RawImage<'a> {
         Ok(thumbs.into_inner())
     }
 
-    /// Enables or disables the ultra-fast pixel binning output.
-    /// Must be called before `unpack()`.
+    /// Enables or disables half-size output (2x2 pixel binning, no
+    /// demosaicing), which is much faster. Takes effect at the next
+    /// [`process`](Self::process).
     pub fn set_half_size(&mut self, enable: bool) {
-        // Because we are touching a C-struct, Rust requires an unsafe block.
-        // We are telling the compiler "I know what I'm doing with this pointer."
-        unsafe {
-            // Find what the underlying C pointer is named in their struct.
-            // It might be `self.inner`, `self.libraw_data`, or `self.ptr`.
-            // We access the `params` struct and flip the `half_size` integer.
-            (*self.ptr()).params.half_size = if enable { 1 } else { 0 };
-        }
+        unsafe { (*self.ptr()).params.half_size = enable.into() };
     }
 
     /// Upper bound on raw data memory LibRaw may allocate in
@@ -239,7 +233,7 @@ impl<'a> RawImage<'a> {
     /// If not available, Auto-WB is used.
     pub fn set_use_camera_wb(&mut self, enable: bool) {
         unsafe {
-            (*self.ptr()).params.use_camera_wb = if enable { 1 } else { 0 };
+            (*self.ptr()).params.use_camera_wb = enable.into();
         }
     }
 
