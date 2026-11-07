@@ -68,12 +68,7 @@ impl<'a> RawImage<'a> {
     }
 
     pub fn unpack(&mut self) -> Result<()> {
-        unsafe {
-            let raw_param = &mut (*self.ptr()).rawparams;
-            raw_param.use_rawspeed = 1;
-            raw_param.max_raw_memory_mb = 1024;
-            Error::check(sys::libraw_unpack(self.ptr()))
-        }
+        Error::check(unsafe { sys::libraw_unpack(self.ptr()) })
     }
 
     pub fn extract_thumbs(&mut self) -> Result<Vec<ThumbnailImage>> {
@@ -107,6 +102,12 @@ impl<'a> RawImage<'a> {
             // We access the `params` struct and flip the `half_size` integer.
             (*self.ptr()).params.half_size = if enable { 1 } else { 0 };
         }
+    }
+
+    /// Upper bound on raw data memory LibRaw may allocate in
+    /// [`unpack`](Self::unpack). LibRaw's default is 2048 MB.
+    pub fn set_max_raw_memory_mb(&mut self, mb: u32) {
+        unsafe { (*self.ptr()).rawparams.max_raw_memory_mb = mb };
     }
 
     pub fn width(&self) -> u32 {
