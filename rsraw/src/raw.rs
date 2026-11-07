@@ -1,4 +1,4 @@
-use std::{borrow::Cow, marker::PhantomData, ptr::NonNull};
+use std::{borrow::Cow, marker::PhantomData, path::Path, ptr::NonNull};
 
 use chrono::{DateTime, Local, TimeZone};
 use rsraw_sys as sys;
@@ -54,8 +54,8 @@ unsafe impl Send for RawImage<'_> {}
 
 impl<'a> RawImage<'a> {
     pub fn open(buf: &'a [u8]) -> Result<Self> {
-        let raw_data = NonNull::new(unsafe { sys::libraw_init(0) })
-            .ok_or(Error::UnsufficientMemory)?;
+        let raw_data =
+            NonNull::new(unsafe { sys::libraw_init(0) }).ok_or(Error::UnsufficientMemory)?;
         // Construct `Self` before anything can fail so `Drop` closes the handle.
         let image = Self {
             raw_data,
@@ -64,6 +64,21 @@ impl<'a> RawImage<'a> {
         Error::check(unsafe {
             sys::libraw_open_buffer(image.raw_data.as_ptr(), buf.as_ptr() as *const _, buf.len())
         })?;
+        Ok(image)
+    }
+
+    pub fn open_file(path: &Path) -> Result<Self> {
+        let raw_data =
+            NonNull::new(unsafe { sys::libraw_init(0) }).ok_or(Error::UnsufficientMemory)?;
+        let image = Self {
+            raw_data,
+            _buf: PhantomData,
+        };
+
+        let c_str = std::ffi::CString::new(path.as_os_str().to_string_lossy().as_ref())
+            .map_err(|_| Error::Io)?;
+
+        Error::check(unsafe { sys::libraw_open_file(image.raw_data.as_ptr(), c_str.as_ptr()) })?;
         Ok(image)
     }
 
