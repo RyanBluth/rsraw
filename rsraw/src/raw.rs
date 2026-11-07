@@ -56,6 +56,17 @@ impl<'a> RawImage<'a> {
         self.raw_data.as_ptr()
     }
 
+    /// Raw pointer to the underlying LibRaw handle, for settings this wrapper
+    /// does not expose.
+    ///
+    /// # Safety
+    /// LibRaw trusts every field of `libraw_data_t`, including internal
+    /// pointers. Callers must only change plain processing parameters and must
+    /// not keep the pointer beyond the lifetime of `self`.
+    pub unsafe fn as_mut_ptr(&mut self) -> *mut sys::libraw_data_t {
+        self.ptr()
+    }
+
     pub fn unpack(&mut self) -> Result<()> {
         unsafe {
             let raw_param = &mut (*self.ptr()).rawparams;
@@ -273,12 +284,6 @@ impl Drop for RawImage<'_> {
 impl AsRef<sys::libraw_data_t> for RawImage<'_> {
     fn as_ref(&self) -> &sys::libraw_data_t {
         unsafe { self.raw_data.as_ref() }
-    }
-}
-
-impl AsMut<sys::libraw_data_t> for RawImage<'_> {
-    fn as_mut(&mut self) -> &mut sys::libraw_data_t {
-        unsafe { self.raw_data.as_mut() }
     }
 }
 
