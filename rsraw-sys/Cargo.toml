@@ -22,6 +22,10 @@ libc = "0.2"
 # bindings are used, which are only valid for 64-bit Unix targets.
 default = ["bindgen"]
 bindgen = ["dep:bindgen"]
+# Parallelise LibRaw's demosaic, decoders and postprocessing with OpenMP.
+# Needs the compiler's OpenMP runtime (libgomp, libomp or vcomp) at link time
+# and on the end user's machine.
+openmp = []
 
 [lib]
 name = "rsraw_sys"

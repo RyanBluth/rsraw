@@ -69,13 +69,49 @@ fn build() {
         // Thread-safe (libraw_r) build.
         libraw.flag_if_supported("-pthread");
     }
+    let openmp_runtime = if env::var_os("CARGO_FEATURE_OPENMP").is_some() {
+        enable_openmp(&mut libraw, msvc)
+    } else {
+        None
+    };
     // cc emits the rustc-link-lib/search directives itself.
     libraw.compile("raw");
+    // After `compile` so the runtime follows libraw on the link line.
+    if let Some(runtime) = openmp_runtime {
+        println!("cargo:rustc-link-lib={runtime}");
+    }
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         // ntohs/htonl; MSVC also honours LibRaw's #pragma comment(lib), GCC does not.
         println!("cargo:rustc-link-lib=ws2_32");
     }
+}
+
+/// Compile with OpenMP and return the runtime library to link, if the linker
+/// does not pick it up by itself. LibRaw defines `LIBRAW_USE_OPENMP` when it
+/// sees `_OPENMP`.
+fn enable_openmp(libraw: &mut cc::Build, msvc: bool) -> Option<&'static str> {
+    if msvc {
+        // The objects carry a /DEFAULTLIB:vcomp directive; no explicit link.
+        libraw.flag("/openmp");
+        return None;
+    }
+    let compiler = libraw.get_compiler();
+    let apple = env::var("CARGO_CFG_TARGET_VENDOR").as_deref() == Ok("apple");
+    if apple {
+        // Apple clang has no `-fopenmp` driver support; libomp must be
+        // installed separately (e.g. Homebrew) and found via LIBOMP_PREFIX.
+        libraw.flag("-Xpreprocessor").flag("-fopenmp");
+        if let Some(prefix) = env::var_os("LIBOMP_PREFIX") {
+            let prefix = PathBuf::from(prefix);
+            libraw.include(prefix.join("include"));
+            println!("cargo:rustc-link-search=native={}", prefix.join("lib").display());
+        }
+        println!("cargo:rerun-if-env-changed=LIBOMP_PREFIX");
+        return Some("omp");
+    }
+    libraw.flag("-fopenmp");
+    Some(if compiler.is_like_clang() { "omp" } else { "gomp" })
 }
 
 /// The checked-in `src/bindings.rs` was generated for an LP64 Unix target

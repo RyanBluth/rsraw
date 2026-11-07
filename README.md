@@ -206,6 +206,7 @@ The library requires a C++ compiler. The LibRaw source (currently **0.22.3**, un
 
 - `bindgen` (default): generate bindings for the exact target at build time. Requires libclang.
 - Without `bindgen` (`default-features = false`): use the checked-in bindings. These are only valid on 64-bit Unix targets (Linux, macOS, iOS, Android); the build fails with a clear message elsewhere (e.g. Windows, where `long` is 32-bit but `time_t` is 64-bit).
+- `openmp`: build LibRaw with OpenMP so demosaicing and postprocessing use every core (about 2.3-2.8x faster `process()` on 16 threads; output is identical). Links the compiler's OpenMP runtime: `libgomp` (GCC), `libomp` (Clang) or `vcomp` (MSVC), which must ship with your application. On Apple targets install libomp (e.g. `brew install libomp`) and set `LIBOMP_PREFIX` to its prefix.
 
 ### Requirements
 

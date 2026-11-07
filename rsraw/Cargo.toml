@@ -17,6 +17,8 @@ exclude = ["tests/assets"]
 # Generate LibRaw bindings with libclang at build time (see rsraw-sys).
 default = ["bindgen"]
 bindgen = ["rsraw-sys/bindgen"]
+# Multi-threaded LibRaw processing (see rsraw-sys).
+openmp = ["rsraw-sys/openmp"]
 
 [dependencies]
 rsraw-sys = { path = "../rsraw-sys", version = "0.2", default-features = false }
