@@ -3,7 +3,9 @@
     non_upper_case_globals,
     clippy::approx_constant,
     clippy::redundant_static_lifetimes,
-    non_snake_case
+    non_snake_case,
+    unknown_lints,
+    unnecessary_transmutes
 )]
 #![no_std]
 
