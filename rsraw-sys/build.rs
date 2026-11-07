@@ -1,12 +1,12 @@
 use std::{
-    env, fs,
+    env,
     path::{Path, PathBuf},
 };
 
 const LIBRAW_DIR: &str = "LibRaw";
 
 fn main() {
-    let dir = env::var_os("OUT_DIR").unwrap();
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     // Any change to LibRaw's sources, private headers or public headers must
     // trigger a rebuild. (bindgen's CargoCallbacks only track headers it sees,
     // which disables Cargo's default whole-package tracking.)
@@ -16,7 +16,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/bindings.rs");
     println!("cargo:rerun-if-changed=build.rs");
 
-    bindings(&dir);
+    bindings(&out_dir);
     build();
 }
 
@@ -78,18 +78,44 @@ fn build() {
     }
 }
 
-fn bindings(out_dir: impl AsRef<Path>) {
-    let path = out_dir.as_ref().join("bindings.rs");
+/// The checked-in `src/bindings.rs` was generated for an LP64 Unix target
+/// (64-bit `long` and `time_t`). Its struct layouts are wrong anywhere else,
+/// e.g. on Windows where `long` is 32-bit but `time_t` is 64-bit.
+fn pregenerated_bindings_match_target() -> bool {
+    let family = env::var("CARGO_CFG_TARGET_FAMILY").unwrap_or_default();
+    let width = env::var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap_or_default();
+    family.split(',').any(|f| f == "unix") && width == "64"
+}
+
+fn bindings(out_dir: &Path) {
+    let path = out_dir.join("bindings.rs");
     let host = env::var("HOST").expect("HOST is not set");
     let target = env::var("TARGET").expect("TARGET is not set");
+    let pregenerated_ok = pregenerated_bindings_match_target();
 
     // Cross builds (e.g. Android in CI) may not have a usable target sysroot
-    // for clang/bindgen. Reuse the checked-in bindings in that case.
-    if host != target {
-        fs::copy("src/bindings.rs", &path).expect("Couldn't copy pregenerated bindings");
+    // for clang, so reuse the checked-in bindings when their layout matches.
+    let use_pregenerated = !cfg!(feature = "bindgen") || (host != target && pregenerated_ok);
+
+    if use_pregenerated {
+        if !pregenerated_ok {
+            panic!(
+                "rsraw-sys: the checked-in bindings only match 64-bit Unix targets; \
+                 enable the `bindgen` feature (requires libclang) to build for {target}"
+            );
+        }
+        std::fs::copy("src/bindings.rs", &path).expect("Couldn't copy pregenerated bindings");
         return;
     }
 
+    #[cfg(feature = "bindgen")]
+    generate_bindings(&path);
+}
+
+/// Regenerate `src/bindings.rs` on a 64-bit Linux host with:
+/// `cargo build -p rsraw-sys && cp target/debug/build/rsraw-sys-*/out/bindings.rs rsraw-sys/src/`
+#[cfg(feature = "bindgen")]
+fn generate_bindings(path: &Path) {
     // bindgen passes `--target` from $TARGET to clang automatically.
     bindgen::Builder::default()
         .header(format!("{LIBRAW_DIR}/libraw/libraw.h"))

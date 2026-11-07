@@ -18,11 +18,14 @@ readme = "../README.md"
 libc = "0.2"
 
 [features]
-default = []
+# Generate bindings with libclang at build time. Without it, the checked-in
+# bindings are used, which are only valid for 64-bit Unix targets.
+default = ["bindgen"]
+bindgen = ["dep:bindgen"]
 
 [lib]
 name = "rsraw_sys"
 
 [build-dependencies]
 cc = { version = "1.2", features = ["parallel"] }
-bindgen = { version = "0.71", default-features = false, features = ["runtime"] }
+bindgen = { version = "0.71", default-features = false, features = ["runtime"], optional = true }
