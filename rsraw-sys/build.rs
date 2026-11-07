@@ -48,26 +48,34 @@ fn libraw_sources() -> Vec<PathBuf> {
 
 fn build() {
     let mut libraw = cc::Build::new();
-    let compiler = libraw.get_compiler();
-    if compiler.is_like_msvc() {
-        panic!("MSVC is not supported");
-    }
+    let msvc = libraw.get_compiler().is_like_msvc();
 
     libraw.cpp(true);
     libraw.include(LIBRAW_DIR);
     libraw.files(libraw_sources());
+    // Static library: no __declspec(dllimport/dllexport) on Windows.
+    libraw.define("LIBRAW_NODLL", None);
 
     libraw.warnings(false);
     libraw.extra_warnings(false);
-    // do I really have to supress all of these?
-    libraw.flag_if_supported("-Wno-format-truncation");
-    libraw.flag_if_supported("-Wno-unused-result");
-    libraw.flag_if_supported("-Wno-format-overflow");
-
-    // thread safety
-    libraw.flag("-pthread");
+    if msvc {
+        // LibRaw uses C++ exceptions for error handling.
+        libraw.flag("/EHsc");
+        libraw.define("_CRT_SECURE_NO_WARNINGS", None);
+    } else {
+        libraw.flag_if_supported("-Wno-format-truncation");
+        libraw.flag_if_supported("-Wno-unused-result");
+        libraw.flag_if_supported("-Wno-format-overflow");
+        // Thread-safe (libraw_r) build.
+        libraw.flag_if_supported("-pthread");
+    }
     // cc emits the rustc-link-lib/search directives itself.
     libraw.compile("raw");
+
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        // ntohs/htonl; MSVC also honours LibRaw's #pragma comment(lib), GCC does not.
+        println!("cargo:rustc-link-lib=ws2_32");
+    }
 }
 
 fn bindings(out_dir: impl AsRef<Path>) {
@@ -84,6 +92,7 @@ fn bindings(out_dir: impl AsRef<Path>) {
 
     let bindings = bindgen::Builder::default()
         .header(format!("{LIBRAW_DIR}/libraw/libraw.h"))
+        .clang_arg("-DLIBRAW_NODLL")
         .use_core()
         .ctypes_prefix("libc")
         .generate_comments(true)
