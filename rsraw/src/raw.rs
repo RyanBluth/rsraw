@@ -25,10 +25,15 @@ unsafe impl Send for RawImage {}
 impl RawImage {
     pub fn open(buf: &[u8]) -> Result<Self> {
         let raw_data = unsafe { sys::libraw_init(0) };
+        if raw_data.is_null() {
+            return Err(Error::UnsufficientMemory);
+        }
+        // Construct `Self` before anything can fail so `Drop` closes the handle.
+        let image = Self { raw_data };
         Error::check(unsafe {
-            sys::libraw_open_buffer(raw_data, buf.as_ptr() as *const _, buf.len())
+            sys::libraw_open_buffer(image.raw_data, buf.as_ptr() as *const _, buf.len())
         })?;
-        Ok(Self { raw_data })
+        Ok(image)
     }
 
     pub fn unpack(&mut self) -> Result<()> {
