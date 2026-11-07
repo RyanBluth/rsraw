@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, marker::PhantomData, ptr::NonNull};
 
 use chrono::{DateTime, Local, TimeZone};
 use rsraw_sys as sys;
@@ -14,41 +14,61 @@ pub type BitDepth = u32;
 pub const BIT_DEPTH_8: BitDepth = 8;
 pub const BIT_DEPTH_16: BitDepth = 16;
 
-pub struct RawImage {
-    raw_data: *mut sys::libraw_data_t,
+/// A LibRaw decoder reading from a caller-owned buffer.
+///
+/// LibRaw keeps a pointer to the buffer passed to [`RawImage::open`] and reads
+/// from it during [`unpack`](Self::unpack) and thumbnail extraction, so the
+/// image borrows the buffer for its whole lifetime:
+///
+/// ```compile_fail
+/// let image = {
+///     let buf = std::fs::read("photo.nef").unwrap();
+///     rsraw::RawImage::open(&buf).unwrap()
+/// }; // error: `buf` does not live long enough
+/// ```
+pub struct RawImage<'a> {
+    raw_data: NonNull<sys::libraw_data_t>,
+    _buf: PhantomData<&'a [u8]>,
 }
 
-unsafe impl Sync for RawImage {}
+// LibRaw has no global mutable state; one instance is only touched through
+// `&mut self` (or read through `&self`), and the borrowed buffer is `Sync`.
+unsafe impl Sync for RawImage<'_> {}
 
-unsafe impl Send for RawImage {}
+unsafe impl Send for RawImage<'_> {}
 
-impl RawImage {
-    pub fn open(buf: &[u8]) -> Result<Self> {
-        let raw_data = unsafe { sys::libraw_init(0) };
-        if raw_data.is_null() {
-            return Err(Error::UnsufficientMemory);
-        }
+impl<'a> RawImage<'a> {
+    pub fn open(buf: &'a [u8]) -> Result<Self> {
+        let raw_data = NonNull::new(unsafe { sys::libraw_init(0) })
+            .ok_or(Error::UnsufficientMemory)?;
         // Construct `Self` before anything can fail so `Drop` closes the handle.
-        let image = Self { raw_data };
+        let image = Self {
+            raw_data,
+            _buf: PhantomData,
+        };
         Error::check(unsafe {
-            sys::libraw_open_buffer(image.raw_data, buf.as_ptr() as *const _, buf.len())
+            sys::libraw_open_buffer(image.raw_data.as_ptr(), buf.as_ptr() as *const _, buf.len())
         })?;
         Ok(image)
     }
 
+    fn ptr(&self) -> *mut sys::libraw_data_t {
+        self.raw_data.as_ptr()
+    }
+
     pub fn unpack(&mut self) -> Result<()> {
         unsafe {
-            let raw_param = &mut (*self.raw_data).rawparams;
+            let raw_param = &mut (*self.ptr()).rawparams;
             raw_param.use_rawspeed = 1;
             raw_param.max_raw_memory_mb = 1024;
-            Error::check(sys::libraw_unpack(self.raw_data))
+            Error::check(sys::libraw_unpack(self.ptr()))
         }
     }
 
     pub fn extract_thumbs(&mut self) -> Result<Vec<ThumbnailImage>> {
         let mut thumbs = Thumbnails::new();
         for i in 0..self.as_ref().thumbs_list.thumbcount {
-            Error::check(unsafe { sys::libraw_unpack_thumb_ex(self.raw_data, i) })?;
+            Error::check(unsafe { sys::libraw_unpack_thumb_ex(self.ptr(), i) })?;
             let thumb = &self.as_ref().thumbnail;
             let thumb_image = ThumbnailImage {
                 format: thumb.tformat.into(),
@@ -74,7 +94,7 @@ impl RawImage {
             // Find what the underlying C pointer is named in their struct.
             // It might be `self.inner`, `self.libraw_data`, or `self.ptr`.
             // We access the `params` struct and flip the `half_size` integer.
-            (*self.raw_data).params.half_size = if enable { 1 } else { 0 };
+            (*self.ptr()).params.half_size = if enable { 1 } else { 0 };
         }
     }
 
@@ -203,44 +223,44 @@ impl RawImage {
     /// If not available, Auto-WB is used.
     pub fn set_use_camera_wb(&mut self, enable: bool) {
         unsafe {
-            (*self.raw_data).params.use_camera_wb = if enable { 1 } else { 0 };
+            (*self.ptr()).params.use_camera_wb = if enable { 1 } else { 0 };
         }
     }
 
     /// On by default, call if you want to force use of DNG embedded matrix.
     pub fn set_use_camera_matrix(&mut self, enable: bool) {
         unsafe {
-            (*self.raw_data).params.use_camera_matrix = if enable { 3 } else { 0 };
+            (*self.ptr()).params.use_camera_matrix = if enable { 3 } else { 0 };
         }
     }
 
     pub fn process<const D: BitDepth>(&mut self) -> Result<ProcessedImage<D>> {
         debug_assert!(D == BIT_DEPTH_8 || D == BIT_DEPTH_16);
-        unsafe { (*self.raw_data).params.output_bps = D as i32 };
-        Error::check(unsafe { sys::libraw_dcraw_process(self.raw_data) })?;
+        unsafe { (*self.ptr()).params.output_bps = D as i32 };
+        Error::check(unsafe { sys::libraw_dcraw_process(self.ptr()) })?;
 
         let mut result = 0i32;
-        let processed = unsafe { sys::libraw_dcraw_make_mem_image(self.raw_data, &mut result) };
+        let processed = unsafe { sys::libraw_dcraw_make_mem_image(self.ptr(), &mut result) };
         Error::check(result)?;
         Ok(unsafe { ProcessedImage::from_raw(processed) })
     }
 }
 
-impl Drop for RawImage {
+impl Drop for RawImage<'_> {
     fn drop(&mut self) {
-        unsafe { sys::libraw_close(self.raw_data) }
+        unsafe { sys::libraw_close(self.ptr()) }
     }
 }
 
-impl AsRef<sys::libraw_data_t> for RawImage {
+impl AsRef<sys::libraw_data_t> for RawImage<'_> {
     fn as_ref(&self) -> &sys::libraw_data_t {
-        unsafe { &*self.raw_data }
+        unsafe { self.raw_data.as_ref() }
     }
 }
 
-impl AsMut<sys::libraw_data_t> for RawImage {
+impl AsMut<sys::libraw_data_t> for RawImage<'_> {
     fn as_mut(&mut self) -> &mut sys::libraw_data_t {
-        unsafe { &mut *self.raw_data }
+        unsafe { self.raw_data.as_mut() }
     }
 }
 
@@ -374,7 +394,6 @@ mod tests {
             let path = assets.join(file);
             let data = std::fs::read(path).unwrap();
             let raw_image = RawImage::open(&data).expect("opened");
-            assert!(!raw_image.raw_data.is_null());
             let full_info = raw_image.full_info();
             assert_eq!(full_info, expected);
         }
