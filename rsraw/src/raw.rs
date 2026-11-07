@@ -14,6 +14,21 @@ pub type BitDepth = u32;
 pub const BIT_DEPTH_8: BitDepth = 8;
 pub const BIT_DEPTH_16: BitDepth = 16;
 
+/// Highlight handling, LibRaw's `params.highlight` (dcraw `-H`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HighlightMode {
+    /// Clip all channels to the saturation point (default). Partially clipped
+    /// highlights can take on a colour cast, typically magenta.
+    #[default]
+    Clip,
+    /// Leave highlights unclipped, in various shades of pink.
+    Unclip,
+    /// Blend clipped and unclipped values for a gradual fade to white.
+    Blend,
+    /// Reconstruct highlights; 1 favours whites, 7 favours colours (dcraw `-H 3..9`).
+    Rebuild(u8),
+}
+
 /// A LibRaw decoder reading from a caller-owned buffer.
 ///
 /// LibRaw keeps a pointer to the buffer passed to [`RawImage::open`] and reads
@@ -100,6 +115,32 @@ impl<'a> RawImage<'a> {
     /// [`process`](Self::process).
     pub fn set_half_size(&mut self, enable: bool) {
         unsafe { (*self.ptr()).params.half_size = enable.into() };
+    }
+
+    /// Output transfer curve as a `(power, toe slope)` pair, e.g.
+    /// `(1.0 / 2.4, 12.92)` for sRGB. LibRaw defaults to BT.709 `(0.45, 4.5)`.
+    pub fn set_gamma(&mut self, power: f64, slope: f64) {
+        unsafe {
+            (*self.ptr()).params.gamm[0] = power;
+            (*self.ptr()).params.gamm[1] = slope;
+        }
+    }
+
+    /// Disables LibRaw's automatic brightening of the output histogram.
+    pub fn set_no_auto_bright(&mut self, disable: bool) {
+        unsafe { (*self.ptr()).params.no_auto_bright = disable.into() };
+    }
+
+    /// How to treat pixels where one or more channels hit the sensor's
+    /// saturation point. Takes effect at the next [`process`](Self::process).
+    pub fn set_highlight_mode(&mut self, mode: HighlightMode) {
+        let value = match mode {
+            HighlightMode::Clip => 0,
+            HighlightMode::Unclip => 1,
+            HighlightMode::Blend => 2,
+            HighlightMode::Rebuild(level) => 2 + i32::from(level.clamp(1, 7)),
+        };
+        unsafe { (*self.ptr()).params.highlight = value };
     }
 
     /// Upper bound on raw data memory LibRaw may allocate in
