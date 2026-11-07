@@ -234,14 +234,32 @@ impl<'a> RawImage<'a> {
         }
     }
 
+    /// Demosaic and colour-convert into an in-memory bitmap with `D` bits per
+    /// sample. Only [`BIT_DEPTH_8`] and [`BIT_DEPTH_16`] are accepted; any
+    /// other depth is rejected at compile time (LibRaw would otherwise write
+    /// past the end of the buffer it allocates):
+    ///
+    /// ```compile_fail
+    /// let buf = std::fs::read("photo.nef").unwrap();
+    /// let mut image = rsraw::RawImage::open(&buf).unwrap();
+    /// let _ = image.process::<12>(); // error: only 8 or 16 bits
+    /// ```
     pub fn process<const D: BitDepth>(&mut self) -> Result<ProcessedImage<D>> {
-        debug_assert!(D == BIT_DEPTH_8 || D == BIT_DEPTH_16);
+        const {
+            assert!(
+                D == BIT_DEPTH_8 || D == BIT_DEPTH_16,
+                "process::<D>() only supports BIT_DEPTH_8 and BIT_DEPTH_16"
+            )
+        };
         unsafe { (*self.ptr()).params.output_bps = D as i32 };
         Error::check(unsafe { sys::libraw_dcraw_process(self.ptr()) })?;
 
         let mut result = 0i32;
         let processed = unsafe { sys::libraw_dcraw_make_mem_image(self.ptr(), &mut result) };
         Error::check(result)?;
+        if processed.is_null() {
+            return Err(Error::UnsufficientMemory);
+        }
         Ok(unsafe { ProcessedImage::from_raw(processed) })
     }
 }
