@@ -52,6 +52,66 @@ unsafe impl Sync for RawImage<'_> {}
 
 unsafe impl Send for RawImage<'_> {}
 
+#[cfg(windows)]
+extern "C" {
+    // Declared here rather than taken from the bindings: the checked-in
+    // bindings are generated on Linux, where LibRaw omits this function.
+    fn libraw_open_wfile(data: *mut sys::libraw_data_t, path: *const u16) -> std::ffi::c_int;
+}
+
+impl RawImage<'static> {
+    /// Open a file by path. LibRaw reads only what it needs, so this is much
+    /// cheaper than reading the whole file for [`RawImage::open`] when only
+    /// metadata is wanted.
+    ///
+    /// Paths are passed to the OS unchanged: raw bytes on Unix, UTF-16 on
+    /// Windows. Fails with [`Error::Io`] if the file cannot be opened, or
+    /// [`Error::InvalidPath`] if the path contains a NUL.
+    pub fn open_file(path: &Path) -> Result<Self> {
+        let raw_data =
+            NonNull::new(unsafe { sys::libraw_init(0) }).ok_or(Error::UnsufficientMemory)?;
+        // Construct `Self` before anything can fail so `Drop` closes the handle.
+        let image = Self {
+            raw_data,
+            _buf: PhantomData,
+        };
+        Error::check(unsafe { open_path(image.ptr(), path)? })?;
+        Ok(image)
+    }
+}
+
+/// # Safety
+/// `data` must be a live handle from `libraw_init`.
+#[cfg(unix)]
+unsafe fn open_path(data: *mut sys::libraw_data_t, path: &Path) -> Result<std::ffi::c_int> {
+    use std::os::unix::ffi::OsStrExt;
+    let path =
+        std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| Error::InvalidPath)?;
+    Ok(sys::libraw_open_file(data, path.as_ptr()))
+}
+
+/// # Safety
+/// `data` must be a live handle from `libraw_init`.
+#[cfg(windows)]
+unsafe fn open_path(data: *mut sys::libraw_data_t, path: &Path) -> Result<std::ffi::c_int> {
+    use std::os::windows::ffi::OsStrExt;
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if wide.contains(&0) {
+        return Err(Error::InvalidPath);
+    }
+    wide.push(0);
+    Ok(libraw_open_wfile(data, wide.as_ptr()))
+}
+
+/// # Safety
+/// `data` must be a live handle from `libraw_init`.
+#[cfg(not(any(unix, windows)))]
+unsafe fn open_path(data: *mut sys::libraw_data_t, path: &Path) -> Result<std::ffi::c_int> {
+    let path = path.to_str().ok_or(Error::InvalidPath)?;
+    let path = std::ffi::CString::new(path).map_err(|_| Error::InvalidPath)?;
+    Ok(sys::libraw_open_file(data, path.as_ptr()))
+}
+
 impl<'a> RawImage<'a> {
     pub fn open(buf: &'a [u8]) -> Result<Self> {
         let raw_data =
@@ -64,21 +124,6 @@ impl<'a> RawImage<'a> {
         Error::check(unsafe {
             sys::libraw_open_buffer(image.raw_data.as_ptr(), buf.as_ptr() as *const _, buf.len())
         })?;
-        Ok(image)
-    }
-
-    pub fn open_file(path: &Path) -> Result<Self> {
-        let raw_data =
-            NonNull::new(unsafe { sys::libraw_init(0) }).ok_or(Error::UnsufficientMemory)?;
-        let image = Self {
-            raw_data,
-            _buf: PhantomData,
-        };
-
-        let c_str = std::ffi::CString::new(path.as_os_str().to_string_lossy().as_ref())
-            .map_err(|_| Error::Io)?;
-
-        Error::check(unsafe { sys::libraw_open_file(image.raw_data.as_ptr(), c_str.as_ptr()) })?;
         Ok(image)
     }
 
@@ -528,5 +573,38 @@ mod tests {
             assert_eq!(image.bits(), bits);
             assert_eq!(image.data_size(), data_size);
         }
+    }
+
+    #[test]
+    fn open_file_matches_open() {
+        let path = get_test_assets_path().join("test-z8.NEF");
+        let bytes = std::fs::read(&path).unwrap();
+        let from_buffer = RawImage::open(&bytes).unwrap();
+        let from_file = RawImage::open_file(&path).unwrap();
+        assert_eq!(from_file.width(), from_buffer.width());
+        assert_eq!(from_file.height(), from_buffer.height());
+        assert!(matches!(
+            RawImage::open_file(&get_test_assets_path().join("missing.NEF")),
+            Err(Error::Io)
+        ));
+        assert!(matches!(
+            RawImage::open_file(Path::new("nul\0byte")),
+            Err(Error::InvalidPath)
+        ));
+    }
+
+    /// Paths are passed through unchanged, not lossily converted to UTF-8.
+    #[cfg(unix)]
+    #[test]
+    fn open_file_accepts_non_utf8_paths() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = std::env::temp_dir().join(format!("rsraw-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let link = dir.join(std::ffi::OsStr::from_bytes(b"caf\xe9.NEF"));
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(get_test_assets_path().join("test-z8.NEF"), &link).unwrap();
+        let result = RawImage::open_file(&link).map(|raw| raw.width());
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(result.unwrap() > 0);
     }
 }

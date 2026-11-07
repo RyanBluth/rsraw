@@ -26,6 +26,7 @@ pub enum Error {
     BadCrop,
     TooBig,
     MempoolOverflow,
+    InvalidPath,
     Unknown(i32),
 }
 
@@ -86,6 +87,7 @@ impl Error {
             Error::BadCrop => "BadCrop",
             Error::TooBig => "TooBig",
             Error::MempoolOverflow => "MempoolOverflow",
+            Error::InvalidPath => "InvalidPath",
             Error::Unknown(_) => "Unknown",
         }
     }
